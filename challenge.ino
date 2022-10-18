@@ -3,116 +3,260 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include "WiFi.h"
- 
-#define AWS_IOT_PUBLISH_TOPIC   "esp32/pub"
-#define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub"
- 
-float h =0;
-float t;
 
- 
+#include <SPI.h>
+#include <Wire.h>
+#include <SparkFunMLX90614.h>  // Biblioeca do Sensor Infravermelho
+#include <LiquidCrystal_I2C.h>
+
+
+LiquidCrystal_I2C display(0x27, 16, 2);  //porta hexa, 16 colunas e 2 linhas
+
+
+#define AWS_IOT_PUBLISH_TOPIC "esp32/2/pub"
+#define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub"
+long lastReconnectAttempt = 0;
+long connectWiFiCount = 0;
+
+IRTherm temperatura;
 WiFiClientSecure net = WiFiClientSecure();
 PubSubClient client(net);
- 
-void connectAWS()
-{
-  Serial.println("Connect to Wi-Fi");
+
+
+void callback(char* topic, byte* message, unsigned int length) {
+  Serial.print("=========================== Message arrived on topic: ");
+  Serial.print(topic);
+  Serial.print(". Message: ");
+  String messageTemp;
+
+  for (int i = 0; i < length; i++) {
+    Serial.print((char)message[i]);
+    messageTemp += (char)message[i];
+  }
+  Serial.println();
+}
+
+void connectWifi() {
+
+  connectWiFiCount = 0;
+
+  Serial.println("Wi-Fi");
+  display.clear();
+  display.print("Conectando Wifi");
+
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
- 
-  Serial.println("Connecting to Wi-Fi");
- 
-  while (WiFi.status() != WL_CONNECTED)
-  {
+
+  Serial.println("Connecting to Wi-Fi: ");
+  display.setCursor(0, 1);
+  display.print(String(WIFI_SSID));
+
+  while (WiFi.status() != WL_CONNECTED) {
     delay(500);
-    Serial.print(".");
+    Serial.println(".");
+    display.print(".");
+    connectWiFiCount++;
+
+    if (connectWiFiCount == 15) {
+      connectWiFiCount = 0;
+      display.clear();
+      display.print("Falha Conexao!");
+      display.setCursor(0, 1);
+      display.print(String(WIFI_SSID));
+      delay(500);
+      connectWifi();
+    }
   }
- 
+
+  Serial.println("Wi-Fi: " + String(WIFI_SSID) + " connected!!");
+  display.clear();
+  display.print("Rede [" + String(WIFI_SSID) + "]");
+
+  display.setCursor(0, 1);
+  display.print("Conectado!");
+  delay(1000);
+
+
   // Configure WiFiClientSecure to use the AWS IoT device credentials
   net.setCACert(AWS_CERT_CA);
   net.setCertificate(AWS_CERT_CRT);
   net.setPrivateKey(AWS_CERT_PRIVATE);
- 
+}
+
+boolean connectAWS() {
+
+
+  Serial.println("RECONECTAR THING");
   // Connect to the MQTT broker on the AWS endpoint we defined earlier
   client.setServer(AWS_IOT_ENDPOINT, 8883);
- 
-  // Create a message handler
-  client.setCallback(messageHandler);
- 
+
   Serial.println("Connecting to AWS IOT");
- 
-  while (!client.connect(THINGNAME))
-  {
-    Serial.print(".");
-    delay(100);
+  display.clear();
+  display.print("Conectando no ");
+  display.setCursor(0, 1);
+  display.print("IoT Remoto...");
+
+  if (client.connect(THINGNAME)) {
+    //Serial.print("Thing founded...");
+    publishMessage();
+  } else {
+    Serial.println("Falha na Conexão!");  //Exibe a mensagem de falha
+    Serial.println(client.state());       // exibe o código pelo qual não foi possível conectar
+    /*
+    * -4 : MQTT_CONNECTION_TIMEOUT - the server didn't respond within the keepalive time
+    * -3 : MQTT_CONNECTION_LOST - the network connection was broken
+    * -2 : MQTT_CONNECT_FAILED - the network connection failed
+    * -1 : MQTT_DISCONNECTED - the client is disconnected cleanly
+    * 0 : MQTT_CONNECTED - the client is connected
+    * 1 : MQTT_CONNECT_BAD_PROTOCOL - the server doesn't support the requested version of MQTT
+    * 2 : MQTT_CONNECT_BAD_CLIENT_ID - the server rejected the client identifier
+    * 3 : MQTT_CONNECT_UNAVAILABLE - the server was unable to accept the connection
+    * 4 : MQTT_CONNECT_BAD_CREDENTIALS - the username/password were rejected
+    * 5 : MQTT_CONNECT_UNAUTHORIZED - the client was not authorized to connect
+    */
   }
- 
-  if (!client.connected())
-  {
+
+  if (!client.connected()) {
     Serial.println("AWS IoT Timeout!");
+    Serial.println(client.state()); 
+    Serial.println("");
+
+    display.clear();
+    display.print("Erro! Tempo esgotado!");
+    display.setCursor(0,1);
+    display.print("cod erro: " + String(client.state()));
+    delay(3000);
+    return false;
+  }
+
+  // Subscribe to a topic
+  if (client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC)) {
+    Serial.println("subscribe ok");
+    // Create a message handler
+    client.setCallback(callback);
+  } else {
+    Serial.println("subscribe fails!");
+  }
+
+  Serial.println("AWS IoT Connected!");
+  display.print("AWS IoT Conectado!");
+
+  return client.connected();
+}
+
+
+void setup() {
+  Serial.begin(115200);
+  display.init();
+  display.backlight();
+
+  display.print("Iniciando Sensor");
+
+  if (temperatura.begin()) {
+    display.clear();
+    display.print("Sensor Ok!");
+  } else {
+    display.print("Sensor/Problema1");
     return;
   }
- 
-  // Subscribe to a topic
-  client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC);
- 
-  Serial.println("AWS IoT Connected!");
-  
-}
- 
-void publishMessage()
-{
-  StaticJsonDocument<200> doc;
-  doc["humidity"] = h;
-  doc["temperature"] = t;
-  char jsonBuffer[512];
-  serializeJson(doc, jsonBuffer); // print to client
- 
-  client.publish(AWS_IOT_PUBLISH_TOPIC, jsonBuffer);
-}
- 
-void messageHandler(char* topic, byte* payload, unsigned int length)
-{
-  Serial.print("incoming: ");
-  Serial.println(topic);
- 
-  StaticJsonDocument<200> doc;
-  deserializeJson(doc, payload);
-  const char* message = doc["message"];
-  Serial.println(message);
-}
- 
-void setup()
-{
-  Serial.begin(115200);
-  connectAWS();
-  delay(10000);
-}
- 
-void loop()
-{
-  mqttLoop();
+  delay(1000);
 
-}
-long messageSentAt = 0;
-void mqttLoop() {
-  if (!client.connected()) {
-    Serial.println("Reconectando...");
-      connectAWS();
+  // Inicia o Sensor no endereço 0x5A
+  temperatura.setUnit(TEMP_C);  // Define a temperatura em Celsius
+
+  if (!temperatura.read()) {
+    display.print("Sensor/Problema2");
+    display.clear();
+    return;
   }
 
-  h = 3;
-  t = h + 1;
+  delay(1000);
+  display.print("Sensor Ok!");
+  display.clear();
 
-   Serial.print(F("Humidity: "));
-  Serial.print(h);
-  Serial.print(F("%  Temperature: "));
-  Serial.print(t);
-  Serial.println(F("°C "));
+  lastReconnectAttempt = 0;
+
+  delay(1500);
+}
 
 
-  
-  client.loop();
-  delay(3000);
-  publishMessage();
+void loop() {
+
+  if (!temperatura.read()) {
+    display.print("Sensor/Problema");
+    display.clear();
+    return;
+  }
+
+  if (!WiFi.isConnected()) {
+    connectWifi();
+  }
+
+  if (!client.connected()) {
+    long now = millis();
+    if (now - lastReconnectAttempt > 5000) {
+      lastReconnectAttempt = now;
+      // Attempt to reconnect
+      if (connectAWS()) {
+        lastReconnectAttempt = 0;
+      }
+    }
+  } else {
+    // Client connected
+    client.loop();
+  }
+}
+
+
+void sensor() {
+  if (temperatura.read()) {
+
+    // temperatura.wake();
+    display.clear();  // Posiciona o cursor
+
+    display.print("Objeto: " + String(temperatura.object(), 2));
+    Serial.println("Objeto: " + String(temperatura.object(), 2));
+
+    display.setCursor(0, 1);  // Posiciona o cursor
+    display.print("Ambiente: " + String(temperatura.ambient(), 2));
+    Serial.println("Ambiente: " + String(temperatura.ambient(), 2));
+    //temperatura.sleep();
+    delay(1000);
+
+    if(temperatura.object() > 34) {
+      display.clear();
+      display.print("Alerta!");
+      display.setCursor(0, 1);
+      display.print("Notificando....");
+      delay(3000);
+    }
+
+
+  } else {
+    Serial.println("temperature fails!! ");
+  }
+}
+
+void publishMessage() {
+
+  sensor();
+
+  display.clear();
+  display.print("Enviando dados...");
+
+
+  StaticJsonDocument<200> doc;
+  doc["ambient"] = String(temperatura.ambient(), 2).toFloat();
+  doc["temperature"] = String(temperatura.object(), 2).toFloat();
+  char jsonBuffer[512];
+  serializeJson(doc, jsonBuffer);  // print to client
+
+  if (client.publish(AWS_IOT_PUBLISH_TOPIC, jsonBuffer)) {
+    Serial.println("publish ok!");
+    display.clear();
+    display.print("pub: " + String(AWS_IOT_PUBLISH_TOPIC));
+    delay(2000);
+  } else {
+    Serial.println("publish error!");
+  }
 }
