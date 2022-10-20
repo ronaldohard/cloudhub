@@ -96,6 +96,12 @@ boolean connectAWS() {
   display.setCursor(0, 1);
   display.print("IoT Remoto...");
 
+  sendAndReceive();
+
+  return client.connected();
+}
+
+boolean sendAndReceive() {
   if (client.connect(THINGNAME)) {
     //Serial.print("Thing founded...");
     publishMessage();
@@ -140,10 +146,7 @@ boolean connectAWS() {
 
   Serial.println("AWS IoT Connected!");
   display.print("AWS IoT Conectado!");
-
-  return client.connected();
 }
-
 
 void setup() {
   Serial.begin(115200);
@@ -183,26 +186,31 @@ void setup() {
 void loop() {
 
   if (!temperatura.read()) {
+    Serial.println("mlx90614 fails...");
     display.print("Sensor/Problema");
     display.clear();
     return;
   }
 
   if (!WiFi.isConnected()) {
-    connectWifi();
+    Serial.println("wifi lose...");
+    return connectWifi();
   }
 
   if (!client.connected()) {
     long now = millis();
-    if (now - lastReconnectAttempt > 5000) {
+    if (now - lastReconnectAttempt > 1000) {
+      Serial.println("now - 5000");
       lastReconnectAttempt = now;
       // Attempt to reconnect
       if (connectAWS()) {
+        Serial.println("reconnecting...");
         lastReconnectAttempt = 0;
       }
     }
   } else {
     // Client connected
+    sendAndReceive();
     client.loop();
   }
 }
