@@ -23,33 +23,21 @@ WiFiClientSecure net = WiFiClientSecure();
 PubSubClient client(net);
 
 
-void callback(char* topic, byte* message, unsigned int length) {
-  Serial.print("=========================== Message arrived on topic: ");
-  Serial.print(topic);
-  Serial.print(". Message: ");
-  String messageTemp;
 
-  for (int i = 0; i < length; i++) {
-    Serial.print((char)message[i]);
-    messageTemp += (char)message[i];
-  }
-  Serial.println();
-}
-
-void connectWifi() {
+void connectWifi(const char* ssid, const char* password) {
 
   connectWiFiCount = 0;
 
-  Serial.println("Wi-Fi");
+  Serial.println("Wi-Fi: " + String(ssid));
   display.clear();
   display.print("Conectando Wifi");
 
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.begin(ssid, password);
 
   Serial.println("Connecting to Wi-Fi: ");
   display.setCursor(0, 1);
-  display.print(String(WIFI_SSID));
+  display.print(String(ssid));
 
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
@@ -62,15 +50,15 @@ void connectWifi() {
       display.clear();
       display.print("Falha Conexao!");
       display.setCursor(0, 1);
-      display.print(String(WIFI_SSID));
+      display.print(String(ssid));
       delay(500);
-      connectWifi();
+      connectWifi(ssid, password);
     }
   }
 
-  Serial.println("Wi-Fi: " + String(WIFI_SSID) + " connected!!");
+  Serial.println("Wi-Fi: " + String(ssid) + " connected!!");
   display.clear();
-  display.print("Rede [" + String(WIFI_SSID) + "]");
+  display.print("Rede [" + String(ssid) + "]");
 
   display.setCursor(0, 1);
   display.print("Conectado!");
@@ -96,6 +84,9 @@ boolean connectAWS() {
   display.setCursor(0, 1);
   display.print("IoT Remoto...");
 
+  Serial.println("AWS IoT Connected!");
+  display.print("AWS IoT Conectado!");
+
   sendAndReceive();
 
   return client.connected();
@@ -104,7 +95,7 @@ boolean connectAWS() {
 boolean sendAndReceive() {
   if (client.connect(THINGNAME)) {
     //Serial.print("Thing founded...");
-    publishMessage();
+   // publishMessage();
   } else {
     Serial.println("Falha na Conexão!");  //Exibe a mensagem de falha
     Serial.println(client.state());       // exibe o código pelo qual não foi possível conectar
@@ -136,16 +127,13 @@ boolean sendAndReceive() {
   }
 
   // Subscribe to a topic
-  if (client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC)) {
-    Serial.println("subscribe ok");
-    // Create a message handler
-    client.setCallback(callback);
-  } else {
+  if (!client.subscribe(AWS_IOT_SUBSCRIBE_TOPIC)) {
     Serial.println("subscribe fails!");
   }
 
-  Serial.println("AWS IoT Connected!");
-  display.print("AWS IoT Conectado!");
+  client.setCallback(callback);
+  
+
 }
 
 void setup() {
@@ -194,12 +182,12 @@ void loop() {
 
   if (!WiFi.isConnected()) {
     Serial.println("wifi lose...");
-    return connectWifi();
+    return connectWifi((const char*) "#",  (const char*) "12345678");
   }
 
   if (!client.connected()) {
     long now = millis();
-    if (now - lastReconnectAttempt > 1000) {
+    if (now - lastReconnectAttempt > 5000) {
       Serial.println("now - 5000");
       lastReconnectAttempt = now;
       // Attempt to reconnect
@@ -267,4 +255,29 @@ void publishMessage() {
   } else {
     Serial.println("publish error!");
   }
+}
+
+
+void callback(char* topic, byte* message, unsigned int length) {
+  Serial.print("=========================== Message arrived on topic: ");
+  Serial.print(topic);
+  Serial.print(". Message: (length) " + String(length) + "  :  ");
+  String payload;
+
+  for (int i = 0; i < length; i++) {
+    payload += (char)message[i];
+  }
+
+  Serial.println(String(payload));
+
+  //StaticJsonDocument <256> doc;
+  //deserializeJson(doc,payload);
+
+  // deserializeJson(doc,str); can use string instead of payload
+
+
+  //net.stop();
+
+  //connectWifi(doc["ssid"], doc["password"]);
+  //Serial.println();
 }
