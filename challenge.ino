@@ -17,6 +17,7 @@ LiquidCrystal_I2C display(0x27, 16, 2);  //porta hexa, 16 colunas e 2 linhas
 #define AWS_IOT_SUBSCRIBE_TOPIC "esp32/sub"
 long lastReconnectAttempt = 0;
 long connectWiFiCount = 0;
+int reconnectToWifiDefault = 0;
 
 IRTherm temperatura;
 WiFiClientSecure net = WiFiClientSecure();
@@ -52,7 +53,14 @@ void connectWifi(const char* ssid, const char* password) {
       display.setCursor(0, 1);
       display.print(String(ssid));
       delay(500);
-      connectWifi(ssid, password);
+      reconnectToWifiDefault++;
+
+      if (reconnectToWifiDefault == 2) {
+        reconnectToWifiDefault = 0;
+        connectWifi("#", "12345678");
+      } else {
+        connectWifi(ssid, password);
+      }
     }
   }
 
@@ -95,7 +103,7 @@ boolean connectAWS() {
 boolean sendAndReceive() {
   if (client.connect(THINGNAME)) {
     //Serial.print("Thing founded...");
-   // publishMessage();
+    publishMessage();
   } else {
     Serial.println("Falha na Conexão!");  //Exibe a mensagem de falha
     Serial.println(client.state());       // exibe o código pelo qual não foi possível conectar
@@ -115,12 +123,12 @@ boolean sendAndReceive() {
 
   if (!client.connected()) {
     Serial.println("AWS IoT Timeout!");
-    Serial.println(client.state()); 
+    Serial.println(client.state());
     Serial.println("");
 
     display.clear();
     display.print("Erro! Tempo esgotado!");
-    display.setCursor(0,1);
+    display.setCursor(0, 1);
     display.print("cod erro: " + String(client.state()));
     delay(3000);
     return false;
@@ -132,8 +140,6 @@ boolean sendAndReceive() {
   }
 
   client.setCallback(callback);
-  
-
 }
 
 void setup() {
@@ -182,7 +188,7 @@ void loop() {
 
   if (!WiFi.isConnected()) {
     Serial.println("wifi lose...");
-    return connectWifi((const char*) "#",  (const char*) "12345678");
+    return connectWifi((const char*)"#", (const char*)"12345678");
   }
 
   if (!client.connected()) {
@@ -219,7 +225,7 @@ void sensor() {
     //temperatura.sleep();
     delay(1000);
 
-    if(temperatura.object() > 34) {
+    if (temperatura.object() > 34) {
       display.clear();
       display.print("Alerta!");
       display.setCursor(0, 1);
@@ -247,6 +253,9 @@ void publishMessage() {
   char jsonBuffer[512];
   serializeJson(doc, jsonBuffer);  // print to client
 
+  display.clear();
+  display.print(String(jsonBuffer));
+
   if (client.publish(AWS_IOT_PUBLISH_TOPIC, jsonBuffer)) {
     Serial.println("publish ok!");
     display.clear();
@@ -270,14 +279,12 @@ void callback(char* topic, byte* message, unsigned int length) {
 
   Serial.println(String(payload));
 
-  //StaticJsonDocument <256> doc;
-  //deserializeJson(doc,payload);
+  StaticJsonDocument<256> doc;
+  deserializeJson(doc, payload);
 
-  // deserializeJson(doc,str); can use string instead of payload
+  display.clear();
+  display.print("Nova Rede...");
 
-
-  //net.stop();
-
-  //connectWifi(doc["ssid"], doc["password"]);
-  //Serial.println();
+  connectWifi(doc["ssid"], doc["password"]);
+  Serial.println();
 }
